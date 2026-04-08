@@ -1,0 +1,29 @@
+# Data folders
+data/raw/
+data/processed/
+data/auto_labels/
+data/corrected_labels/
+data/combined/
+data/radar/
+
+# Large files
+*.mp4
+*.avi
+*.zip
+*.pt
+*.pth
+
+# YOLO outputs
+runs/
+models/
+
+# Python
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db

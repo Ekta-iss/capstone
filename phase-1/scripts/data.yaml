@@ -1,0 +1,13 @@
+# Dataset root (LOCAL)
+path: C:/Users/ekta/MTech/Capstone/crane-ai/phase-1/data/processed
+
+# Train/Val split (we will create later)
+train: video1/images
+val: video1/images
+
+# Classes - MUST match your obj.names sequence exactly
+names:
+  0: spreader
+  1: container
+  2: guide_mark
+  3: target_slot
