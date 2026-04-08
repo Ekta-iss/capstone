@@ -1,39 +1,39 @@
-import pickle
+import numpy as np
 import matplotlib.pyplot as plt
+import pickle
 
-# Image dimensions (replace with your actual video/image dimensions)
-IMG_W, IMG_H = 1920, 1080  
+RADAR_DATA_PATH = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\radar\radar_features.pkl"
 
-RADAR_FILE = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\radar\radar_features.pkl"
-
-with open(RADAR_FILE, "rb") as f:
-    radar_data = pickle.load(f)
-
-# Visualize first N frames
-N_FRAMES = 10
-
-for frame_idx in range(N_FRAMES):
+def plot_scass_environment(radar_data, frame_idx=14):
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, projection='polar')
+    ax.set_theta_zero_location("N")
+    
+    # Color coding for SCASS classes
+    colors = {0: 'blue', 1: 'green', 2: 'orange', 3: 'red'}
+    
     frame_objects = radar_data[frame_idx]
     
-    plt.figure(figsize=(12, 6))
-    plt.title(f"Radar-like frame {frame_idx}")
-    plt.xlim(0, IMG_W)
-    plt.ylim(0, IMG_H)
-    plt.xlabel("X (pixels)")
-    plt.ylabel("Y (pixels)")
-    
     for obj in frame_objects:
-        # scale normalized center to pixel coords
-        cx = obj['center'][0] * IMG_W
-        cy = obj['center'][1] * IMG_H
-        size = obj['size'] * max(IMG_W, IMG_H)  # scale size to image
+        cls_id = obj["class"]
+        r = obj["distance"] * 20 
+        theta = obj["angle"]
         
-        # Plot circle for object
-        circle = plt.Circle((cx, cy), radius=size, fill=False, edgecolor='r', linewidth=2)
-        plt.gca().add_patch(circle)
-        
-        # Plot center
-        plt.plot(cx, cy, 'bo')
+        ax.scatter(theta, r, c=colors[cls_id], s=250, label=obj["class_name"], edgecolors='black')
+        ax.text(theta, r + 25, f"{obj['distance']:.2f}m", 
+                color=colors[cls_id], fontweight='bold', ha='center')
+
+    ax.set_ylim(0, 450)
+    ax.set_title(f"SCASS Industrial Radar View - Frame {frame_idx}\n(Spreader, Container, Guide, Slot)", pad=35)
     
-    plt.gca().invert_yaxis()  # optional: origin at top-left like images
+    # Legend cleanup (no duplicates)
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), loc='upper right', bbox_to_anchor=(1.2, 1.1))
+    
     plt.show()
+
+if __name__ == "__main__":
+    with open(RADAR_DATA_PATH, "rb") as f:
+        data = pickle.load(f)
+    plot_scass_environment(data, frame_idx=14)

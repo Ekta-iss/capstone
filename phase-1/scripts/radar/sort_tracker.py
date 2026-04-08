@@ -47,7 +47,10 @@ class Sort:
         # Associate detections to trackers
         if len(self.trackers) == 0:
             for d in dets:
-                self.trackers.append(KalmanBoxTracker(d))
+                tracker = KalmanBoxTracker(d)
+                self.trackers.append(tracker)
+                updated_tracks.append((tracker.bbox, tracker.id))
+            return updated_tracks
         else:
             trks = np.array([t.predict() for t in self.trackers])
             iou_matrix = np.zeros((len(trks), len(dets)), dtype=np.float32)
