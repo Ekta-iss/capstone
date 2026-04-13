@@ -2,3 +2,4 @@ tqdm
 numpy
 cv2
 filterpy
+albumentations

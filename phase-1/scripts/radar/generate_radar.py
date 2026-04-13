@@ -8,17 +8,16 @@ from tqdm import tqdm
 LABELS_FOLDER = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\combined\video1\labels"
 OUTPUT_FILE = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\radar\radar_features.pkl"
 
-# Class Mapping
 CLASS_NAMES = {0: 'spreader', 1: 'container', 2: 'guide_mark', 3: 'target_slot'}
-MAX_ALT = 15.0 
+# MAX_RANGE represents the distance to the furthest visible ground point (~18-20m slant range)
+MAX_RANGE = 20.0 
 
 def main():
     label_files = sorted([f for f in os.listdir(LABELS_FOLDER) if f.endswith('.txt')])
     all_radar_features = []
-    
     raw_data_history = {cls: [] for cls in CLASS_NAMES.keys()}
 
-    print("--- Phase 1: Parsing All Classes ---")
+    print("--- Phase 1: Capturing Sensor-Centric Data ---")
     for file in tqdm(label_files):
         path = os.path.join(LABELS_FOLDER, file)
         frame_detections = {cls: None for cls in CLASS_NAMES.keys()}
@@ -30,6 +29,7 @@ def main():
                         cls, x, y, w, h = map(float, line.split())
                         cls = int(cls)
                         if cls in CLASS_NAMES:
+                            # We use the 'y' coordinate as a proxy for depth
                             frame_detections[cls] = y
                     except ValueError: continue
         
@@ -39,50 +39,47 @@ def main():
             elif raw_data_history[cls]:
                 val = raw_data_history[cls][-1]
             else:
-                # Default: Spreader at bottom (0.8), Environment at top (0.1)
-                val = 0.8 if cls == 0 else 0.1
+                # Spreader starts in the foreground (0.8), Others in background (0.2)
+                val = 0.8 if cls == 0 else 0.2
             raw_data_history[cls].append(val)
 
-    print("--- Phase 2: Signal Stabilization ---")
-    smoothed_data = {}
-    for cls, values in raw_data_history.items():
-        window_size = 15 
-        if len(values) > window_size:
-            smoothed_data[cls] = savgol_filter(values, window_size, 3)
-        else:
-            smoothed_data[cls] = values
+    print("--- Phase 2: Smoothing ---")
+    smoothed_data = {cls: savgol_filter(values, 15, 3) if len(values) > 15 else values 
+                     for cls, values in raw_data_history.items()}
 
-    print("--- Phase 3: Finalizing Feature Set ---")
+    print("--- Phase 3: Slant Range Calculation ---")
     for i in range(len(label_files)):
         frame_list = []
         for cls in CLASS_NAMES.keys():
             y_smooth = smoothed_data[cls][i]
             
-            # UNIFIED TOP-DOWN PHYSICS
-            # To get Spreader ~3m and Guide_Mark ~14m:
-            # We must use y_smooth for the environment (top = far)
-            # and 1-y_smooth for the foreground (bottom = close).
+            # NATURAL FLOW LOGIC (Sensor Co-located with Camera):
+            # y=1.0 (Bottom) -> Object is right under the lens (Distance = Min)
+            # y=0.0 (Top)    -> Object is at the horizon (Distance = Max)
             
-            if cls == 0: # SPREADER (Foreground/Close)
-                dist_m = MAX_ALT * (1.0 - y_smooth)
-            else: # CONTAINER, GUIDE_MARK, TARGET_SLOT (Background/Far)
-                dist_m = MAX_ALT * y_smooth
-                # If they are still too small, it means they are detected at the top (y=0.1).
-                # To push them to the ground (14m), we reverse them:
-                dist_m = MAX_ALT * (1.0 - y_smooth) if dist_m < 5 else dist_m
+            # Base distance calculation
+            dist_m = MAX_RANGE * (1.0 - y_smooth)
             
+            # Offset: Ensure Spreader isn't '0m' (it hangs ~2-3m below camera)
+            if cls == 0: 
+                dist_m += 2.5 
+            
+            # Limit the ground objects to a realistic pier distance (e.g. 14-16m)
+            if cls != 0 and dist_m < 8.0:
+                dist_m = 14.5 + (y_smooth * 0.5) # Ground marks stay far
+
             frame_list.append({
                 "class": cls,
                 "class_name": CLASS_NAMES[cls],
                 "distance": float(dist_m),
-                "angle": 0.0 if cls == 0 else (0.1 if cls == 1 else -0.1),
+                "angle": 0.0,
                 "track_id": cls
             })
         all_radar_features.append(frame_list)
 
     with open(OUTPUT_FILE, "wb") as f:
         pickle.dump(all_radar_features, f)
-    print(f"✅ Logic fixed. Spreader is close, others are far.")
+    print(f"✅ Co-located Radar Data Generated: {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     main()
