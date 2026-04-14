@@ -194,6 +194,12 @@ def main():
         "avg_cycle_time_sec": round(avg_frames * FRAME_TIME, 2)
     }
 
+    print("\n📊 DEBUG SUMMARY")
+    print(f"Total frames: {len(images)}")
+    print(f"Active cycles detected: {tracker.cycles}")
+    print(f"Cycle durations (frames): {tracker.cycle_durations}")
+    print(f"Idle time (sec): {tracker.idle_time}")
+
     print("\n📊 FINAL KPI REPORT:")
     print(json.dumps(kpi, indent=4))
 
