@@ -6,13 +6,17 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 # ========================
 # CONFIG
 # ========================
 DATA_DIR = "../../data/radar/processed"
 MODEL_PATH = "../../models/tcn_radar.pth"
+OUTPUT_DIR = "../../outputs/radar_eval"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # ========================
@@ -42,8 +46,13 @@ class TCNBlock(nn.Module):
         padding = (kernel_size - 1) * dilation
 
         self.net = nn.Sequential(
-            nn.Conv1d(in_channels, out_channels, kernel_size,
-                      padding=padding, dilation=dilation),
+            nn.Conv1d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                padding=padding,
+                dilation=dilation
+            ),
             Chomp1d(padding),
             nn.ReLU()
         )
@@ -74,60 +83,136 @@ class TCN(nn.Module):
 # ========================
 # METRICS
 # ========================
+def compute_feature_metrics(y_true, y_pred, idx):
+    mae = mean_absolute_error(y_true[:, idx], y_pred[:, idx])
+    rmse = np.sqrt(mean_squared_error(y_true[:, idx], y_pred[:, idx]))
+    r2 = r2_score(y_true[:, idx], y_pred[:, idx])
+    return mae, rmse, r2
+
+
 def compute_metrics(y_true, y_pred):
-    mse = np.mean((y_true - y_pred) ** 2)
-    mae = np.mean(np.abs(y_true - y_pred))
-
     print("\n📊 MODEL PERFORMANCE")
-    print(f"MSE: {mse:.6f}")
-    print(f"MAE: {mae:.6f}")
 
-    # per feature
+    overall_mse = np.mean((y_true - y_pred) ** 2)
+    overall_mae = np.mean(np.abs(y_true - y_pred))
+    overall_rmse = np.sqrt(overall_mse)
+
+    print(f"Overall MSE  : {overall_mse:.6f}")
+    print(f"Overall MAE  : {overall_mae:.6f}")
+    print(f"Overall RMSE : {overall_rmse:.6f}")
+
     labels = ["Distance", "Angle", "Velocity"]
+    metrics_dict = {}
 
-    for i in range(3):
-        err = np.mean(np.abs(y_true[:, i] - y_pred[:, i]))
-        print(f"{labels[i]} MAE: {err:.6f}")
+    for i, label in enumerate(labels):
+        mae, rmse, r2 = compute_feature_metrics(y_true, y_pred, i)
+        metrics_dict[label] = {
+            "MAE": mae,
+            "RMSE": rmse,
+            "R2": r2
+        }
+
+        print(f"\n{label} Metrics:")
+        print(f"  MAE  : {mae:.6f}")
+        print(f"  RMSE : {rmse:.6f}")
+        print(f"  R²   : {r2:.6f}")
+
+    euclidean_error = np.linalg.norm(y_true - y_pred, axis=1)
+    print(f"\nEuclidean Error Magnitude:")
+    print(f"  Mean  : {np.mean(euclidean_error):.6f}")
+    print(f"  Std   : {np.std(euclidean_error):.6f}")
+    print(f"  Max   : {np.max(euclidean_error):.6f}")
+
+    return metrics_dict, euclidean_error
 
 
 # ========================
 # PLOTS FOR PPT
 # ========================
-def plot_results(y_true, y_pred):
+def add_metric_box(ax, mae, rmse, r2):
+    textstr = f"MAE: {mae:.3f}\nRMSE: {rmse:.3f}\nR²: {r2:.3f}"
+    ax.text(
+        0.02, 0.98, textstr,
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment='top',
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85)
+    )
 
-    # --- Distance ---
-    plt.figure()
-    plt.plot(y_true[:200, 0], label="Actual")
-    plt.plot(y_pred[:200, 0], label="Predicted")
-    plt.title("Distance Prediction")
-    plt.legend()
-    plt.savefig("distance_prediction.png")
-    plt.show()
 
-    # --- Velocity ---
-    plt.figure()
-    plt.plot(y_true[:200, 2], label="Actual")
-    plt.plot(y_pred[:200, 2], label="Predicted")
-    plt.title("Velocity Prediction")
-    plt.legend()
-    plt.savefig("velocity_prediction.png")
-    plt.show()
+def plot_results(y_true, y_pred, metrics_dict, euclidean_error, num_samples=200):
+    plt.style.use("default")
 
-    # --- Error distribution ---
-    error = np.linalg.norm(y_true - y_pred, axis=1)
+    # --- Distance Prediction ---
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.plot(y_true[:num_samples, 0], label="Actual", linewidth=2)
+    ax.plot(y_pred[:num_samples, 0], label="Predicted", linewidth=2)
+    ax.set_title("Distance Prediction", fontsize=13)
+    ax.set_xlabel("Sample Index")
+    ax.set_ylabel("Distance")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
 
-    plt.figure()
-    plt.hist(error, bins=30)
-    plt.title("Prediction Error Distribution")
-    plt.savefig("error_distribution.png")
-    plt.show()
+    add_metric_box(
+        ax,
+        metrics_dict["Distance"]["MAE"],
+        metrics_dict["Distance"]["RMSE"],
+        metrics_dict["Distance"]["R2"]
+    )
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUT_DIR, "distance_prediction.png"), dpi=300)
+    plt.close(fig)
+
+    # --- Velocity Prediction ---
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.plot(y_true[:num_samples, 2], label="Actual", linewidth=1.8)
+    ax.plot(y_pred[:num_samples, 2], label="Predicted", linewidth=1.8)
+    ax.set_title("Velocity Prediction", fontsize=13)
+    ax.set_xlabel("Sample Index")
+    ax.set_ylabel("Velocity")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    add_metric_box(
+        ax,
+        metrics_dict["Velocity"]["MAE"],
+        metrics_dict["Velocity"]["RMSE"],
+        metrics_dict["Velocity"]["R2"]
+    )
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUT_DIR, "velocity_prediction.png"), dpi=300)
+    plt.close(fig)
+
+    # --- Error Distribution ---
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.hist(euclidean_error, bins=30, alpha=0.85, edgecolor="black")
+    ax.set_title("Euclidean Error Magnitude Distribution", fontsize=13)
+    ax.set_xlabel("Euclidean Error Magnitude")
+    ax.set_ylabel("Frequency")
+    ax.grid(True, alpha=0.3)
+
+    mean_err = np.mean(euclidean_error)
+    std_err = np.std(euclidean_error)
+    ax.text(
+        0.02, 0.98,
+        f"Mean: {mean_err:.3f}\nStd: {std_err:.3f}",
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment='top',
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85)
+    )
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUT_DIR, "error_distribution.png"), dpi=300)
+    plt.close(fig)
 
 
 # ========================
 # MAIN
 # ========================
 def main():
-
     print("Loading test data...")
     X_test, y_test = load_data()
 
@@ -135,8 +220,7 @@ def main():
 
     print("Loading model...")
     model = TCN().to(DEVICE)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE),
-    strict=False)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE), strict=False)
     model.eval()
 
     print("Running predictions...")
@@ -144,16 +228,16 @@ def main():
         y_pred = model(X_test).cpu().numpy()
 
     print("Evaluating performance...")
-    compute_metrics(y_test, y_pred)
+    metrics_dict, euclidean_error = compute_metrics(y_test, y_pred)
 
     print("\nGenerating plots for PPT...")
-    plot_results(y_test, y_pred)
+    plot_results(y_test, y_pred, metrics_dict, euclidean_error)
 
     print("\n✅ Evaluation complete!")
     print("Saved plots:")
-    print("- distance_prediction.png")
-    print("- velocity_prediction.png")
-    print("- error_distribution.png")
+    print(f"- {os.path.join(OUTPUT_DIR, 'distance_prediction.png')}")
+    print(f"- {os.path.join(OUTPUT_DIR, 'velocity_prediction.png')}")
+    print(f"- {os.path.join(OUTPUT_DIR, 'error_distribution.png')}")
 
 
 if __name__ == "__main__":

@@ -3,3 +3,4 @@ numpy
 cv2
 filterpy
 albumentations
+scikit-learn
