@@ -103,7 +103,8 @@ for idx in tqdm(range(min(len(cv_images), len(radar_data)))):
                 "class_name": CLASS_NAMES[cls],
                 "radar_distance": current_dist,
                 "radar_angle": r_obj["angle"],
-                "radar_track_id": r_obj["track_id"]
+                "radar_track_id": r_obj["track_id"],
+                "radar_velocity": r_obj.get("velocity", 0.0)
             })
 
     merged_dataset.append({"image_path": img_path, "objects": merged_objects})

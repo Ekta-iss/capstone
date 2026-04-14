@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 PKL_PATH = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\radar\radar_features.pkl"
-CSV_PATH = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\radar\radar_telemetry2.csv"
+CSV_PATH = r"C:\Users\ekta\MTech\Capstone\crane-ai\phase-1\data\radar\radar_telemetry3.csv"
 
 CLASS_MAP = {
     0: "spreader",
