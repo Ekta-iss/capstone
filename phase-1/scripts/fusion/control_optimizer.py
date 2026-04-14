@@ -1,38 +1,30 @@
-def optimize_control(lstm_pred, risk_score):
+def optimize_control(lstm_pred, risk_score, cycle_time=None):
 
-    """
-    Returns crane control decision
-    """
+    future_dist, angle, risk = lstm_pred
 
-    future_dist, angle, predicted_risk = lstm_pred
+    speed = 1.0
+    action = "NORMAL"
+    reason = "Safe operation"
 
-    # SAFE STATE
-    if risk_score > 0.7 or predicted_risk > 0.7:
-        return {
-            "action": "STOP",
-            "speed": 0,
-            "reason": "HIGH_RISK"
-        }
+    # risk-based control
+    if risk_score > 0.7:
+        action = "STOP"
+        speed = 0.2
+        reason = "High risk detected"
+    elif risk_score > 0.4:
+        action = "SLOW"
+        speed = 0.5
+        reason = "Moderate risk detected"
 
-    # CAUTIOUS STATE
-    if risk_score > 0.4:
-        return {
-            "action": "SLOW",
-            "speed": 0.3,
-            "reason": "MEDIUM_RISK"
-        }
+    # cycle time adjustment (NEW LOGIC)
+    if cycle_time is not None:
+        if cycle_time > 30:
+            speed *= 0.8
+            reason += " | High cycle time reducing speed"
 
-    # OPTIMAL STATE
-    if future_dist < 5:
-        return {
-            "action": "ALIGN_AND_PICK",
-            "speed": 0.7,
-            "reason": "OBJECT_IN_RANGE"
-        }
-
-    # IDLE MOVEMENT
     return {
-        "action": "SEARCH",
-        "speed": 0.5,
-        "reason": "NO_TARGET"
+        "action": action,
+        "speed": round(speed, 2),
+        "reason": reason,
+        "cycle_time": cycle_time
     }
