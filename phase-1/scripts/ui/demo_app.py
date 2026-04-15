@@ -222,11 +222,7 @@ if st.session_state.running:
         # =========================
         cv_box.image(result.plot(), channels="BGR", use_container_width=True)
 
-        state = radar_state(float(risk))
-
-        radar_box.markdown("### 📡 Radar Intelligence State")
-        radar_box.markdown(f"## {state}")
-        radar_box.metric("Raw Score", f"{risk:.2f}")
+        radar_box.metric("Radar Intelligence Score", float(risk))
 
         phase_metric.metric("Phase", phase)
         risk_metric.metric("Risk", f"{risk:.2f}")
