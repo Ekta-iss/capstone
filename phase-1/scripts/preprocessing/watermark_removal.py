@@ -26,17 +26,24 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 # VIDEO CONFIG
 # ------------------------------
 VIDEO_SETTINGS = {
-    1: {  # CVAT-labeled YOLO dataset
-        "input_images": os.path.join(BASE_DIR, "data/cvat/video1/obj_train_data/images"),
-        "input_labels": os.path.join(BASE_DIR, "data/cvat/video1/obj_train_data/labels"),
-        "output_images": os.path.join(BASE_DIR, "data/processed/video1/watermark_removed/images"),
-        "output_labels": os.path.join(BASE_DIR, "data/processed/video1/watermark_removed/labels"),
-        "labeled": True
-    },
-    2: {  # Raw frames
-        "input_images": os.path.join(BASE_DIR, "data/raw/frames/video2_frames"),
+    # 1: {  # CVAT-labeled YOLO dataset
+    #     "input_images": os.path.join(BASE_DIR, "data/cvat/video1/obj_train_data/images"),
+    #     "input_labels": os.path.join(BASE_DIR, "data/cvat/video1/obj_train_data/labels"),
+    #     "output_images": os.path.join(BASE_DIR, "data/processed/video1/watermark_removed/images"),
+    #     "output_labels": os.path.join(BASE_DIR, "data/processed/video1/watermark_removed/labels"),
+    #     "labeled": True
+    # },
+    # 2: {  # Raw frames
+    #     "input_images": os.path.join(BASE_DIR, "data/raw/frames/video2_frames"),
+    #     "input_labels": None,
+    #     "output_images": os.path.join(BASE_DIR, "data/processed/video2/watermark_removed/images"),
+    #     "output_labels": None,
+    #     "labeled": False
+    # },
+    1: {  # Raw frames
+        "input_images": os.path.join(BASE_DIR, "data/combined/video1/images"),
         "input_labels": None,
-        "output_images": os.path.join(BASE_DIR, "data/processed/video2/watermark_removed/images"),
+        "output_images": os.path.join(BASE_DIR, "data/combined/video1/watermark_removed/images"),
         "output_labels": None,
         "labeled": False
     }
@@ -100,5 +107,6 @@ def process_video(video_id):
 # MAIN
 # ------------------------------
 if __name__ == "__main__":
-    process_video(1)  # CVAT-labeled YOLO dataset
-    process_video(2)  # Raw video2 frames
+    # process_video(1)  # CVAT-labeled YOLO dataset
+    # process_video(2)  # Raw video2 frames
+    process_video(1)

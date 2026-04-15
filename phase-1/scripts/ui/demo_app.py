@@ -34,7 +34,7 @@ MODEL_PATH = glob.glob(
     recursive=True
 )[0]
 
-IMAGE_FOLDER = os.path.join(PROJECT_ROOT, "data", "combined", "video1", "images")
+IMAGE_FOLDER = os.path.join(PROJECT_ROOT, "data", "combined", "video1", "watermark_removed", "images")
 RADAR_PATH = os.path.join(PROJECT_ROOT, "data", "radar", "radar_features.pkl")
 TCN_PATH = os.path.join(PROJECT_ROOT, "models", "tcn_radar.pt")
 
