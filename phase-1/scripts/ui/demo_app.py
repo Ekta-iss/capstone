@@ -7,144 +7,116 @@ import glob
 import cv2
 import pickle
 import pandas as pd
+import torch
 from ultralytics import YOLO
 
 # =========================================================
-# ROOT & PATHS (Logic remains the same)
+# ROOT PATH
 # =========================================================
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = CURRENT_DIR
-while os.path.basename(PROJECT_ROOT) != "scripts" and len(PROJECT_ROOT) > 3:
+
+while not os.path.exists(os.path.join(PROJECT_ROOT, "data")):
     PROJECT_ROOT = os.path.dirname(PROJECT_ROOT)
-PROJECT_ROOT = os.path.dirname(PROJECT_ROOT)
+
 sys.path.append(PROJECT_ROOT)
 
 from scripts.fusion.control_optimizer import optimize_control
-
-MODEL_GLOB = os.path.join(PROJECT_ROOT, "scripts", "cv", "runs", "**", "weights", "best.pt")
-IMAGE_FOLDER = os.path.join(PROJECT_ROOT, "data", "combined", "video1", "images")
-RADAR_PATH = os.path.join(PROJECT_ROOT, "data", "radar", "radar_features.pkl")
+from scripts.radar.sort_tracker import Sort
 
 # =========================================================
-# CONFIG & HYBRID THEME STYLE
+# CONFIG
 # =========================================================
 st.set_page_config(page_title="Terminal iQ", layout="wide")
 
-st.markdown("""
-<style>
-    /* 1. Main Dashboard (Dark) */
-    .stApp { background-color: #0f172a; }
-    h1, h2, h3, [data-testid="stMetricLabel"], .main .stMarkdown p {
-        color: #ffffff !important;
-    }
+MODEL_PATH = glob.glob(
+    os.path.join(PROJECT_ROOT, "scripts", "cv", "runs", "**", "weights", "best.pt"),
+    recursive=True
+)[0]
 
-    /* 2. Left Panel / Sidebar (White Background, Black Text) */
-    [data-testid="stSidebar"] {
-        background-color: #ffffff !important;
-        border-right: 1px solid #e2e8f0;
-    }
-    
-    /* Target all text, headers, and labels inside the sidebar */
-    [data-testid="stSidebar"] .stMarkdown p, 
-    [data-testid="stSidebar"] h1, 
-    [data-testid="stSidebar"] h2, 
-    [data-testid="stSidebar"] h3, 
-    [data-testid="stSidebar"] label {
-        color: #000000 !important;
-    }
+IMAGE_FOLDER = os.path.join(PROJECT_ROOT, "data", "combined", "video1", "images")
+RADAR_PATH = os.path.join(PROJECT_ROOT, "data", "radar", "radar_features.pkl")
+TCN_PATH = os.path.join(PROJECT_ROOT, "models", "tcn_radar.pt")
 
-    /* 3. Top Bar Styling */
-    .topbar {
-        background: linear-gradient(90deg,#0ea5e9,#1e3a8a);
-        padding:15px;
-        border-radius:10px;
-        text-align:center;
-        color: white !important;
-        font-size:26px;
-        font-weight:bold;
-        margin-bottom:20px;
-    }
-
-    /* 4. Dashboard Specific Elements */
-    [data-testid="stMetricValue"] {
-        color: #38bdf8 !important;
-        font-size: 32px;
-    }
-    code {
-        background-color: #1e293b !important;
-        color: #38bdf8 !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("<div class='topbar'>🚢 TERMINAL iQ — LIVE CRANE AI SYSTEM</div>", unsafe_allow_html=True)
+FOV_DEG = 60
+MAX_RANGE = 20
 
 # =========================================================
-# DATA LOADING (Logic remains same)
+# LOAD MODELS (CACHED)
 # =========================================================
 @st.cache_resource
 def load_yolo():
-    matches = glob.glob(MODEL_GLOB, recursive=True)
-    return YOLO(matches[0]) if matches else None
+    return YOLO(MODEL_PATH)
 
-@st.cache_data
-def get_image_list():
-    return sorted([os.path.join(IMAGE_FOLDER, f) for f in os.listdir(IMAGE_FOLDER) if f.endswith((".jpg", ".png"))]) if os.path.exists(IMAGE_FOLDER) else []
+@st.cache_resource
+def load_tcn():
+    if os.path.exists(TCN_PATH):
+        return torch.load(TCN_PATH, map_location="cpu")
+    return None
+
+model = load_yolo()
+tcn_model = load_tcn()
+tracker = Sort()
+
+# =========================================================
+# LOAD DATA
+# =========================================================
+image_files = sorted([
+    os.path.join(IMAGE_FOLDER, f)
+    for f in os.listdir(IMAGE_FOLDER)
+])
 
 @st.cache_data
 def load_radar():
     if os.path.exists(RADAR_PATH):
-        with open(RADAR_PATH, "rb") as f: return pickle.load(f)
+        with open(RADAR_PATH, "rb") as f:
+            return pickle.load(f)
     return None
 
-model = load_yolo()
-image_files = get_image_list()
 radar_data = load_radar()
 
-if not model or not image_files:
-    st.error("Data or Model weights not found.")
-    st.stop()
+# =========================================================
+# SESSION STATE (NO FLICKER CONTROL)
+# =========================================================
+if "running" not in st.session_state:
+    st.session_state.running = False
+
+if "frame_idx" not in st.session_state:
+    st.session_state.frame_idx = 0
+
+if "last_frame" not in st.session_state:
+    st.session_state.last_frame = None
+
+if "last_radar" not in st.session_state:
+    st.session_state.last_radar = None
+
+if "last_control" not in st.session_state:
+    st.session_state.last_control = None
 
 # =========================================================
-# SESSION STATE
+# UI (UNCHANGED STRUCTURE)
 # =========================================================
-if "running" not in st.session_state: st.session_state.running = False
-if "frame_idx" not in st.session_state: st.session_state.frame_idx = 0
+st.title("🚢 TERMINAL iQ — LIVE CRANE AI SYSTEM")
 
-# =========================================================
-# SIDEBAR (WHITE BG / BLACK TEXT)
-# =========================================================
-with st.sidebar:
-    st.header("⚙️ Configuration")
-    conf = st.slider("Detection Confidence", 0.1, 0.9, 0.4)
-    phase_threshold = st.slider("Phase Sensitivity", 1, 10, 3)
-    risk_threshold = st.slider("Risk Alert Threshold", 0.1, 1.0, 0.7)
-    
-    st.divider()
-    
-    c1, c2 = st.columns(2)
-    if c1.button("▶ START", use_container_width=True):
+conf = st.slider("Detection Confidence", 0.1, 0.9, 0.4)
+phase_threshold = st.slider("Phase Sensitivity", 1, 10, 3)
+risk_threshold = st.slider("Risk Alert Threshold", 0.1, 1.0, 0.7)
+
+col1, col2 = st.columns(2)
+
+if not st.session_state.running:
+    if col1.button("▶ START"):
         st.session_state.running = True
-    if c2.button("⛔ STOP", use_container_width=True):
+
+if st.session_state.running:
+    if col2.button("⛔ STOP"):
         st.session_state.running = False
-        
-    if st.button("🔄 RESET SYSTEM", use_container_width=True):
-        st.session_state.frame_idx = 0
-        st.session_state.running = False
-        st.rerun()
+
+st.divider()
 
 # =========================================================
-# MAIN DASHBOARD LAYOUT (DARK BG / WHITE TEXT)
+# PLACEHOLDERS (CRITICAL FOR NO FLICKER)
 # =========================================================
-def detect_phase(n, threshold):
-    if n == 0: return "IDLE"
-    return "ALIGNMENT" if n < threshold else "LIFT" if n < threshold * 2 else "TRANSPORT"
-
-def compute_risk(detections):
-    if not detections: return 0.05
-    spread = np.std([d[0] for d in detections]) if len(detections) > 1 else 0
-    return float(np.clip(0.1 * len(detections) + 0.4 * (spread/100), 0, 1))
-
 left, right = st.columns([2, 1])
 
 with left:
@@ -154,51 +126,121 @@ with left:
 with right:
     st.subheader("📡 Radar Spatial Map")
     radar_box = st.empty()
-    st.divider()
+
     st.subheader("🚨 System Status")
     alert_box = st.empty()
-    
-    m_col1, m_col2 = st.columns(2)
-    phase_metric = m_col1.empty()
-    risk_metric = m_col2.empty()
-    
-    st.write("**Optimization Output:**")
+
+    m1, m2 = st.columns(2)
+    phase_metric = m1.empty()
+    risk_metric = m2.empty()
+
+    st.write("**Optimization Output**")
     opt_box = st.empty()
 
 # =========================================================
-# EXECUTION LOOP
+# LOGIC FUNCTIONS
+# =========================================================
+def detect_phase(n, th):
+    if n == 0:
+        return "IDLE"
+    if n < th:
+        return "ALIGNMENT"
+    if n < th * 2:
+        return "LIFT"
+    return "TRANSPORT"
+
+def compute_risk(tracks):
+    if len(tracks) == 0:
+        return 0.05
+    return float(np.clip(0.1 * len(tracks) + 0.3 * np.std([t[0] for t in tracks]), 0, 1))
+
+# =========================================================
+# MAIN LOOP (VIDEO STYLE EXECUTION)
 # =========================================================
 if st.session_state.running:
-    for img_path in image_files[st.session_state.frame_idx:]:
-        if not st.session_state.running: break
-            
-        frame = cv2.imread(img_path)
-        if frame is None: continue
-        
+
+    for i in range(st.session_state.frame_idx, len(image_files)):
+
+        if not st.session_state.running:
+            break
+
+        frame = cv2.imread(image_files[i])
+
+        # =========================
+        # YOLO
+        # =========================
         result = model.predict(frame, conf=conf, verbose=False)[0]
-        plotted = result.plot()
-        
-        detections = [((b.xyxy[0][0]+b.xyxy[0][2])/2, (b.xyxy[0][1]+b.xyxy[0][3])/2) for b in result.boxes]
-        phase = detect_phase(len(detections), phase_threshold)
-        risk = compute_risk(detections)
+
+        dets = []
+        for b in result.boxes:
+            x1, y1, x2, y2 = b.xyxy[0]
+            dets.append([x1, y1, x2, y2])
+
+        # =========================
+        # SORT TRACKING
+        # =========================
+        tracks = tracker.update(np.array(dets))
+
+        # =========================
+        # RADAR SEQUENCE (FROM TRACKS)
+        # =========================
+        radar_seq = []
+        for bbox, tid in tracks:
+            x1, y1, x2, y2 = bbox
+
+            cx = (x1 + x2) / 2 / frame.shape[1]
+            cy = (y1 + y2) / 2 / frame.shape[0]
+
+            radar_seq.append([cx, cy])
+
+        radar_output = None
+
+        # =========================
+        # TCN RADAR INFERENCE (REAL MODEL OUTPUT)
+        # =========================
+        if tcn_model is not None and len(radar_seq) >= 5:
+            seq = np.array(radar_seq[-10:])
+            seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
+
+            with torch.no_grad():
+                radar_output = tcn_model(seq_tensor).cpu().numpy()
+
+        # fallback (only if needed)
+        if radar_output is None:
+            radar_output = np.array([[np.mean(radar_seq) if radar_seq else 0]])
+
+        # =========================
+        # CONTROL INPUT
+        # =========================
+        phase = detect_phase(len(tracks), phase_threshold)
+        risk = float(np.clip(radar_output[0][0], 0, 1))
+
         control = optimize_control((0, 0, risk), risk)
 
-        cv_box.image(plotted, channels="BGR", use_container_width=True)
-        
-        if radar_data and st.session_state.frame_idx < len(radar_data):
-            try:
-                df_radar = pd.DataFrame(radar_data[st.session_state.frame_idx])
-                radar_box.scatter_chart(df_radar.rename(columns={"angle":"x","distance":"y"})[["x","y"]], x="x", y="y", height=250)
-            except: pass
+        # =========================
+        # UI UPDATE (NO FLICKER)
+        # =========================
+        cv_box.image(result.plot(), channels="BGR", use_container_width=True)
 
-        phase_metric.metric("Current Phase", phase)
-        risk_metric.metric("Risk Score", f"{risk:.2f}")
-        opt_box.code(f"{control}")
+        state = radar_state(float(risk))
 
-        if risk > risk_threshold: alert_box.error("⚠️ HIGH RISK DETECTED")
-        else: alert_box.success("✅ SYSTEM SAFE")
+        radar_box.markdown("### 📡 Radar Intelligence State")
+        radar_box.markdown(f"## {state}")
+        radar_box.metric("Raw Score", f"{risk:.2f}")
+
+        phase_metric.metric("Phase", phase)
+        risk_metric.metric("Risk", f"{risk:.2f}")
+
+        opt_box.code(control)
+
+        if risk > risk_threshold:
+            alert_box.error("⚠ HIGH RISK DETECTED")
+        else:
+            alert_box.success("SYSTEM SAFE")
 
         st.session_state.frame_idx += 1
-        time.sleep(0.01)
+
+        time.sleep(0.03)
+
 else:
-    cv_box.info("System Paused. Press START to resume.")
+    cv_box.info("System Paused. Press START")
