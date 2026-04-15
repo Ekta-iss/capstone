@@ -38,8 +38,11 @@ IMAGE_FOLDER = os.path.join(PROJECT_ROOT, "data", "combined", "video1", "images"
 RADAR_PATH = os.path.join(PROJECT_ROOT, "data", "radar", "radar_features.pkl")
 TCN_PATH = os.path.join(PROJECT_ROOT, "models", "tcn_radar.pt")
 
+FOV_DEG = 60
+MAX_RANGE = 20
+
 # =========================================================
-# LOAD MODELS
+# LOAD MODELS (CACHED)
 # =========================================================
 @st.cache_resource
 def load_yolo():
@@ -56,15 +59,24 @@ tcn_model = load_tcn()
 tracker = Sort()
 
 # =========================================================
-# DATA
+# LOAD DATA
 # =========================================================
 image_files = sorted([
     os.path.join(IMAGE_FOLDER, f)
     for f in os.listdir(IMAGE_FOLDER)
 ])
 
+@st.cache_data
+def load_radar():
+    if os.path.exists(RADAR_PATH):
+        with open(RADAR_PATH, "rb") as f:
+            return pickle.load(f)
+    return None
+
+radar_data = load_radar()
+
 # =========================================================
-# SESSION STATE
+# SESSION STATE (NO FLICKER CONTROL)
 # =========================================================
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -72,8 +84,17 @@ if "running" not in st.session_state:
 if "frame_idx" not in st.session_state:
     st.session_state.frame_idx = 0
 
+if "last_frame" not in st.session_state:
+    st.session_state.last_frame = None
+
+if "last_radar" not in st.session_state:
+    st.session_state.last_radar = None
+
+if "last_control" not in st.session_state:
+    st.session_state.last_control = None
+
 # =========================================================
-# UI
+# UI (UNCHANGED STRUCTURE)
 # =========================================================
 st.title("🚢 TERMINAL iQ — LIVE CRANE AI SYSTEM")
 
@@ -94,7 +115,7 @@ if st.session_state.running:
 st.divider()
 
 # =========================================================
-# PLACEHOLDERS
+# PLACEHOLDERS (CRITICAL FOR NO FLICKER)
 # =========================================================
 left, right = st.columns([2, 1])
 
@@ -103,7 +124,7 @@ with left:
     cv_box = st.empty()
 
 with right:
-    st.subheader("📡 Radar Intelligence")
+    st.subheader("📡 Radar Spatial Map")
     radar_box = st.empty()
 
     st.subheader("🚨 System Status")
@@ -117,7 +138,7 @@ with right:
     opt_box = st.empty()
 
 # =========================================================
-# LOGIC
+# LOGIC FUNCTIONS
 # =========================================================
 def detect_phase(n, th):
     if n == 0:
@@ -128,16 +149,13 @@ def detect_phase(n, th):
         return "LIFT"
     return "TRANSPORT"
 
-def classify_radar_state(risk):
-    if risk < 0.3:
-        return "SAFE", "🟢"
-    elif risk < 0.7:
-        return "WARNING", "🟡"
-    else:
-        return "CRITICAL", "🔴"
+def compute_risk(tracks):
+    if len(tracks) == 0:
+        return 0.05
+    return float(np.clip(0.1 * len(tracks) + 0.3 * np.std([t[0] for t in tracks]), 0, 1))
 
 # =========================================================
-# MAIN LOOP
+# MAIN LOOP (VIDEO STYLE EXECUTION)
 # =========================================================
 if st.session_state.running:
 
@@ -148,7 +166,9 @@ if st.session_state.running:
 
         frame = cv2.imread(image_files[i])
 
-        # ================= YOLO =================
+        # =========================
+        # YOLO
+        # =========================
         result = model.predict(frame, conf=conf, verbose=False)[0]
 
         dets = []
@@ -156,20 +176,28 @@ if st.session_state.running:
             x1, y1, x2, y2 = b.xyxy[0]
             dets.append([x1, y1, x2, y2])
 
-        # ================= TRACKING =================
+        # =========================
+        # SORT TRACKING
+        # =========================
         tracks = tracker.update(np.array(dets))
 
-        # ================= RADAR SEQUENCE =================
+        # =========================
+        # RADAR SEQUENCE (FROM TRACKS)
+        # =========================
         radar_seq = []
         for bbox, tid in tracks:
             x1, y1, x2, y2 = bbox
+
             cx = (x1 + x2) / 2 / frame.shape[1]
             cy = (y1 + y2) / 2 / frame.shape[0]
+
             radar_seq.append([cx, cy])
 
         radar_output = None
 
-        # ================= TCN =================
+        # =========================
+        # TCN RADAR INFERENCE (REAL MODEL OUTPUT)
+        # =========================
         if tcn_model is not None and len(radar_seq) >= 5:
             seq = np.array(radar_seq[-10:])
             seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
@@ -177,41 +205,30 @@ if st.session_state.running:
             with torch.no_grad():
                 radar_output = tcn_model(seq_tensor).cpu().numpy()
 
+        # fallback (only if needed)
         if radar_output is None:
             radar_output = np.array([[np.mean(radar_seq) if radar_seq else 0]])
 
-        # ================= CONTROL =================
+        # =========================
+        # CONTROL INPUT
+        # =========================
         phase = detect_phase(len(tracks), phase_threshold)
         risk = float(np.clip(radar_output[0][0], 0, 1))
 
         control = optimize_control((0, 0, risk), risk)
 
-        # ================= UI =================
+        # =========================
+        # UI UPDATE (NO FLICKER)
+        # =========================
         cv_box.image(result.plot(), channels="BGR", use_container_width=True)
 
-        # 🔥 UPDATED RADAR PANEL
-        state, icon = classify_radar_state(risk)
+        radar_box.metric("Radar Intelligence Score", round(float(risk), 2))
 
-        with radar_box.container():
-            st.metric("Risk Score", f"{risk:.2f}")
-
-            if state == "SAFE":
-                st.success(f"{icon} SAFE ZONE")
-            elif state == "WARNING":
-                st.warning(f"{icon} WARNING ZONE")
-            else:
-                st.error(f"{icon} CRITICAL ZONE")
-
-            st.caption("AI-based spatial risk assessment")
-
-        # METRICS
         phase_metric.metric("Phase", phase)
         risk_metric.metric("Risk", f"{risk:.2f}")
 
-        # CONTROL OUTPUT
         opt_box.code(control)
 
-        # ALERT
         if risk > risk_threshold:
             alert_box.error("⚠ HIGH RISK DETECTED")
         else:
